@@ -27,6 +27,30 @@ git clone https://github.com/growingupfirst/Yolov-Interface-Streamlit
 cd Yolov-Interface-Streamlit
 streamlit run app.py
 ```
+## Extra for running on GPU (Important!)
+In order to work correctly you should install a proper torch version manually. Pip only installs a CPU version automatically.
+I assume that you have the CUDA drivers downloaded beforehand from NVIDIA website.
+
+- If you have the latest CUDA drivers you have to run this command only. It will delete CPU-version and install CUDA-one.
+```bash
+python -m pip install torch torchvision --pre -f https://download.pytorch.org/whl/nightly/cu121/torch_nightly.html --force-reinstall
+```
+- If you have older drivers do this command. Sometimes you may have to change `pip3` to `pip`:
+```bash
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117 --force-reinstall
+```
+- Finally run `python` in terminal and write this command:
+```python
+import torch
+print(torch.cuda.is_available())
+```
+*It should work correctly but sometimes everything fucks up and doesn't work. For me, the second command worked on Python 3.9 but didn't work on Python 3.12. So I managed to find the first one and it worked*
+
+## Extra Numpy errors (Important!)
+Sometimes Numpy crashes because of the incompatibilities with OpenCV library. To solve for that run this in terminal:
+```bash
+pip install -U opencv-python
+```
 
 ### To do (not working at the moment):
 - Supports:

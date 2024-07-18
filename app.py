@@ -8,17 +8,14 @@ import os
 import time
 from ultralytics import YOLO
 import supervision as sv
-from sahi import AutoDetectionModel
-from sahi.predict import get_prediction, get_sliced_prediction, predict
 
 st.set_page_config(layout="wide")
 
 cfg_model_path = 'models/yolov5s.pt'
 model = None
-confidence = .25
 
 
-def image_input(data_src, device, sahi=False):
+def image_input(data_src, confidence, classes, device='cpu', sahi=False):
     img_file = None
     if data_src == 'Sample data':
         # get all sample images
@@ -37,11 +34,11 @@ def image_input(data_src, device, sahi=False):
             st.image(img_file, caption="Selected Image")
         with col2:
             ready_img = cv2.imread(img_file)
-            img = infer_image(img_file, ready_img, device, sahi)
+            img = infer_image(img_file, ready_img, confidence, classes, device, sahi)
             st.image(img, caption="Model prediction")
 
 
-def video_input(data_src, device, sahi=False):
+def video_input(data_src, confidence, classes, device='cpu', sahi=False):
     vid_file = None
     if data_src == 'Sample data':
         vid_file = "data/sample_videos/sample.mp4"
@@ -83,8 +80,8 @@ def video_input(data_src, device, sahi=False):
                 st.write("Can't read frame, stream ended? Exiting ....")
                 break
             frame = cv2.resize(frame, (width, height))
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            output_img = infer_image(frame, frame, device, sahi=sahi)
+            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            output_img = infer_image(frame, frame, confidence, classes, device, sahi=sahi)
             output.image(output_img)
             curr_time = time.time()
             fps = 1 / (curr_time - prev_time)
@@ -96,17 +93,17 @@ def video_input(data_src, device, sahi=False):
         cap.release()
 
 
-def infer_image(img, img_file, device='cpu', sahi='False'):
+def infer_image(img, img_file, confidence, classes, device='cpu', sahi='False'):
     if sahi:
         def callback(image):
-            result = model(image)[0]
+            print(f'Sahi confidence:{confidence}')
+            model.conf = confidence
+            result = model(image, conf=confidence, classes=classes)[0]
             return sv.Detections.from_ultralytics(result)
-        
         slicer = sv.InferenceSlicer(callback=callback)
         detections = slicer(image=img_file)
         bounding_box_annotator = sv.BoxAnnotator()
         label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
-
         rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
         annotated_image = bounding_box_annotator.annotate(
         scene=rgb_img, detections=detections)
@@ -115,21 +112,23 @@ def infer_image(img, img_file, device='cpu', sahi='False'):
         return annotated_image
     else:
         model.conf = confidence
-        result = model(img, device=device) #if size else model(img,device=device)
+        result = model(img, conf=confidence, classes=classes)
+        print(model.conf)
+        print(model.classes)
         detections = sv.Detections.from_ultralytics(result[0])
         bounding_box_annotator = sv.BoxAnnotator(thickness=1)
         label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
-
+        rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
         annotated_image = bounding_box_annotator.annotate(
-            scene=img_file, detections=detections)
+            scene=rgb_img, detections=detections)
         
         annotated_image = label_annotator.annotate(
             scene=annotated_image, detections=detections)
-        
+
         return annotated_image
 
 
-@st.cache_resource
+# @st.cache_resource
 def load_model(path, device):
     model_ = YOLO(path)
     print(device)
@@ -137,12 +136,10 @@ def load_model(path, device):
         model_.to(device)
     else:
         model_.to('cpu')
-    # model_ = torch.hub.load('ultralytics/yolov5', 'custom', path=path, force_reload=True)
-    # detection_model = AutoDetectionModel.from_pretrained(model_path=path, device=device, model_type='yolov8')
     return model_
 
 
-@st.cache_resource
+# @st.cache_resource
 def download_model(url):
     model_file = wget.download(url, out="models")
     return model_file
@@ -168,14 +165,14 @@ def get_user_model():
 
 def main():
     # global variables
-    global model, confidence, cfg_model_path
+    global model, cfg_model_path
 
     st.title("Object Recognition Dashboard")
 
     st.sidebar.title("Settings")
 
     # upload model
-    model_src = st.sidebar.radio("Select yolov5 weight file", ["Use our demo model 5s", "Use your own model"])
+    model_src = st.sidebar.radio("Select weight file", ["Use the demo YOLOV5s", "Use your own model"])
     # URL, upload file (max 200 mb)
     if model_src == "Use your own model":
         user_model_path = get_user_model()
@@ -204,6 +201,7 @@ def main():
             assigned_class = st.sidebar.multiselect("Select Classes", model_names, default=[model_names[0]])
             classes = [model_names.index(name) for name in assigned_class]
             model.classes = classes
+            print(model.classes)
         else:
             model.classes = list(model.names.keys())
 
@@ -216,9 +214,9 @@ def main():
         data_src = st.sidebar.radio("Select input source: ", ['Sample data', 'Upload your own data'])
 
         if input_option == 'image':
-            image_input(data_src, device_option, sahi=sahi_option)
+            image_input(data_src, confidence, classes, device_option, sahi=sahi_option)
         else:
-            video_input(data_src, device_option, sahi=sahi_option)
+            video_input(data_src, confidence, classes, device_option, sahi=sahi_option)
 
 
 if __name__ == "__main__":
