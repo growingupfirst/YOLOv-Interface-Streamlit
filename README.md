@@ -4,7 +4,7 @@ It was based on [this repository](https://github.com/moaaztaha/Yolo-Interface-us
 
 <img src="output.gif" alt="demo of the dashboard" width="800"/>
 
-### [Streamlit Cloud Demo](https://yolov-interface-app-d2ijmoaxhszz2iyshshxnz.streamlit.app/)
+### [Streamlit Cloud Demo](https://yolov-interface-app-s5ga4sb5m4sccjbptn7e9k.streamlit.app/)
 
 
 ## Features
