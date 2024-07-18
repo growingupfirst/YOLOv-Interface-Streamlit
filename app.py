@@ -6,6 +6,10 @@ import torch
 import cv2
 import os
 import time
+from ultralytics import YOLO
+import supervision as sv
+from sahi import AutoDetectionModel
+from sahi.predict import get_prediction, get_sliced_prediction, predict
 
 st.set_page_config(layout="wide")
 
@@ -14,7 +18,7 @@ model = None
 confidence = .25
 
 
-def image_input(data_src):
+def image_input(data_src, device, sahi=False):
     img_file = None
     if data_src == 'Sample data':
         # get all sample images
@@ -32,11 +36,12 @@ def image_input(data_src):
         with col1:
             st.image(img_file, caption="Selected Image")
         with col2:
-            img = infer_image(img_file)
+            ready_img = cv2.imread(img_file)
+            img = infer_image(img_file, ready_img, device, sahi)
             st.image(img, caption="Model prediction")
 
 
-def video_input(data_src):
+def video_input(data_src, device, sahi=False):
     vid_file = None
     if data_src == 'Sample data':
         vid_file = "data/sample_videos/sample.mp4"
@@ -79,7 +84,7 @@ def video_input(data_src):
                 break
             frame = cv2.resize(frame, (width, height))
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            output_img = infer_image(frame)
+            output_img = infer_image(frame, frame, device, sahi=sahi)
             output.image(output_img)
             curr_time = time.time()
             fps = 1 / (curr_time - prev_time)
@@ -91,23 +96,53 @@ def video_input(data_src):
         cap.release()
 
 
-def infer_image(img, size=None):
-    model.conf = confidence
-    result = model(img, size=size) if size else model(img)
-    result.render()
-    image = Image.fromarray(result.ims[0])
-    return image
+def infer_image(img, img_file, device='cpu', sahi='False'):
+    if sahi:
+        def callback(image):
+            result = model(image)[0]
+            return sv.Detections.from_ultralytics(result)
+        
+        slicer = sv.InferenceSlicer(callback=callback)
+        detections = slicer(image=img_file)
+        bounding_box_annotator = sv.BoxAnnotator()
+        label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
+
+        rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
+        annotated_image = bounding_box_annotator.annotate(
+        scene=rgb_img, detections=detections)
+        annotated_image = label_annotator.annotate(
+            scene=annotated_image, detections=detections)
+        return annotated_image
+    else:
+        model.conf = confidence
+        result = model(img, device=device) #if size else model(img,device=device)
+        detections = sv.Detections.from_ultralytics(result[0])
+        bounding_box_annotator = sv.BoxAnnotator(thickness=1)
+        label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
+
+        annotated_image = bounding_box_annotator.annotate(
+            scene=img_file, detections=detections)
+        
+        annotated_image = label_annotator.annotate(
+            scene=annotated_image, detections=detections)
+        
+        return annotated_image
 
 
-@st.experimental_singleton
+@st.cache_resource
 def load_model(path, device):
-    model_ = torch.hub.load('ultralytics/yolov5', 'custom', path=path, force_reload=True)
-    model_.to(device)
-    print("model to ", device)
+    model_ = YOLO(path)
+    print(device)
+    if (device == 'cuda') and (torch.cuda.is_available()):
+        model_.to(device)
+    else:
+        model_.to('cpu')
+    # model_ = torch.hub.load('ultralytics/yolov5', 'custom', path=path, force_reload=True)
+    # detection_model = AutoDetectionModel.from_pretrained(model_path=path, device=device, model_type='yolov8')
     return model_
 
 
-@st.experimental_singleton
+@st.cache_resource
 def download_model(url):
     model_file = wget.download(url, out="models")
     return model_file
@@ -154,11 +189,8 @@ def main():
     if not os.path.isfile(cfg_model_path):
         st.warning("Model file not available!!!, please added to the model folder.", icon="⚠️")
     else:
-        # device options
-        if torch.cuda.is_available():
-            device_option = st.sidebar.radio("Select Device", ['cpu', 'cuda'], disabled=False, index=0)
-        else:
-            device_option = st.sidebar.radio("Select Device", ['cpu', 'cuda'], disabled=True, index=0)
+        sahi_option = st.sidebar.checkbox('Use Sahi')
+        device_option = st.sidebar.radio("Select Device", ['cpu', 'cuda'], disabled=False, index=0)
 
         # load model
         model = load_model(cfg_model_path, device_option)
@@ -184,9 +216,9 @@ def main():
         data_src = st.sidebar.radio("Select input source: ", ['Sample data', 'Upload your own data'])
 
         if input_option == 'image':
-            image_input(data_src)
+            image_input(data_src, device_option, sahi=sahi_option)
         else:
-            video_input(data_src)
+            video_input(data_src, device_option, sahi=sahi_option)
 
 
 if __name__ == "__main__":
