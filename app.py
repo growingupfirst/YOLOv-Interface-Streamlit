@@ -100,7 +100,7 @@ def infer_image(img, img_file, confidence, classes, device='cpu', sahi='False'):
             model.conf = confidence
             result = model(image, conf=confidence, classes=classes)[0]
             return sv.Detections.from_ultralytics(result)
-        slicer = sv.InferenceSlicer(callback=callback)
+        slicer = sv.InferenceSlicer(callback=callback, slice_wh=(320,320), iou_threshold=0.1)
         detections = slicer(image=img_file)
         bounding_box_annotator = sv.BoxAnnotator()
         label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
@@ -191,7 +191,7 @@ def main():
 
         # load model
         model = load_model(cfg_model_path, device_option)
-
+        classes = [list(model.names.values()).index(name) for name in list(model.names.values())]
         # confidence slider
         confidence = st.sidebar.slider('Confidence', min_value=0.1, max_value=1.0, value=.45)
 
