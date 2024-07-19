@@ -13,7 +13,9 @@ It was based on [this repository](https://github.com/moaaztaha/Yolo-Interface-us
 - Supports both images and videos.
 - Supports both CPU and GPU inference.
 - Supports the **latest** YOLO models (v10 n/s/m/l/x)
-
+- **NEW!** Now you can manually adjust splice height and width.
+- **NEW!** When using Sahi you can adjust how many images to skip. If it's 0, then all the images will be used by the model. If it's other than 0, then the script will try save the prediction of the previous image and output the result. (**Important** It may not still work correctly)
+- **NEW!** YOLOv10n added to the repo
 
 ## How to run
 After cloning the repo:

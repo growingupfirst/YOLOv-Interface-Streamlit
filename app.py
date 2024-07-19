@@ -13,9 +13,12 @@ st.set_page_config(layout="wide")
 
 cfg_model_path = 'models/yolov5s.pt'
 model = None
+previous_detections = None
+empty_image_counter = 0
+split_height = 320
+split_width = 320
 
-
-def image_input(data_src, confidence, classes, device='cpu', sahi=False):
+def image_input(data_src, confidence, classes, device='cpu', sahi=False, full_sahi_retrain=False, split_height=320, split_width=320):
     img_file = None
     if data_src == 'Sample data':
         # get all sample images
@@ -34,11 +37,11 @@ def image_input(data_src, confidence, classes, device='cpu', sahi=False):
             st.image(img_file, caption="Selected Image")
         with col2:
             ready_img = cv2.imread(img_file)
-            img = infer_image(img_file, ready_img, confidence, classes, device, sahi)
+            img = infer_image(img_file, ready_img, confidence, classes, device, sahi, full_sahi_retrain=full_sahi_retrain)
             st.image(img, caption="Model prediction")
 
 
-def video_input(data_src, confidence, classes, device='cpu', sahi=False):
+def video_input(data_src, confidence, classes, device='cpu', sahi=False, full_sahi_retrain=False, skip_image=0, split_height=320, split_width=320):
     vid_file = None
     if data_src == 'Sample data':
         vid_file = "data/sample_videos/sample.mp4"
@@ -51,12 +54,15 @@ def video_input(data_src, confidence, classes, device='cpu', sahi=False):
 
     if vid_file:
         cap = cv2.VideoCapture(vid_file)
-        custom_size = st.sidebar.checkbox("Custom frame size")
+        placeholder = st.sidebar.empty()
+        custom_size = placeholder.checkbox("Custom frame size")
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         if custom_size:
-            width = st.sidebar.number_input("Width", min_value=120, step=20, value=width)
-            height = st.sidebar.number_input("Height", min_value=120, step=20, value=height)
+            width_placeholder = st.sidebar.empty()
+            height_placeholder = st.sidebar.empty()
+            width = width_placeholder.number_input("Width", min_value=120, step=20, value=width)
+            height = height_placeholder.number_input("Height", min_value=120, step=20, value=height)
 
         fps = 0
         st1, st2, st3 = st.columns(3)
@@ -74,14 +80,33 @@ def video_input(data_src, confidence, classes, device='cpu', sahi=False):
         output = st.empty()
         prev_time = 0
         curr_time = 0
+        counter = 0
         while True:
             ret, frame = cap.read()
             if not ret:
                 st.write("Can't read frame, stream ended? Exiting ....")
                 break
             frame = cv2.resize(frame, (width, height))
-            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            output_img = infer_image(frame, frame, confidence, classes, device, sahi=sahi)
+            print(f'EMPTY IMAGES:{empty_image_counter}')
+            print(previous_detections)
+            #should boost the performance of the video prediction        
+            if ((counter>0) and (previous_detections is not None)):
+                print('Not training now')                
+                output_img = infer_video_frame(frame, frame, confidence, classes, device,
+                                                sahi=sahi, full_sahi_retrain=full_sahi_retrain,
+                                                  no_skip=False, split_height=split_height, split_width=split_width)
+                counter+=1
+                #SET COUNTER HERE TO CHANGE THE DISAPPEARANCE SPEED OF OBJECT WHICH LEFT THE PAGE 
+                if (counter==skip_image) or (counter > 54):
+                    counter = 0
+            elif (counter == 0) or (previous_detections is None):
+                output_img = infer_video_frame(frame, frame, confidence, classes, device,
+                                                sahi=sahi, full_sahi_retrain=full_sahi_retrain,
+                                                  split_height=split_height, split_width=split_width)
+                counter+=1
+                if skip_image==0:
+                    counter = 0
+                
             output.image(output_img)
             curr_time = time.time()
             fps = 1 / (curr_time - prev_time)
@@ -93,22 +118,109 @@ def video_input(data_src, confidence, classes, device='cpu', sahi=False):
         cap.release()
 
 
-def infer_image(img, img_file, confidence, classes, device='cpu', sahi='False'):
+def infer_image(img, img_file, confidence, classes, device='cpu', sahi='False', full_sahi_retrain = False, detect_large=False, split_height=320, split_width=320):
     if sahi:
         def callback(image):
             print(f'Sahi confidence:{confidence}')
             model.conf = confidence
             result = model(image, conf=confidence, classes=classes)[0]
             return sv.Detections.from_ultralytics(result)
-        slicer = sv.InferenceSlicer(callback=callback, slice_wh=(320,320), iou_threshold=0.1)
+        slicer = sv.InferenceSlicer(callback=callback, slice_wh=(split_height,split_width), iou_threshold=0.01) #if you want to detect more small objects make it high.
         detections = slicer(image=img_file)
+        if full_sahi_retrain:
+            lol = sv.Detections.from_ultralytics(model(img_file, conf=confidence, classes=classes)[0]) #run on full image to get detections of large things
+            detections = sv.Detections.merge([detections, lol]) #merge two detections
+        detections = detections.with_nms(threshold=0.01) #the higher value, the higher chance of double detections
+        #enable confidence mark
+        try:
+            labels = [
+                    f"{class_name} {confidence:.2f}"
+                    for class_name, confidence
+                    in zip(detections['class_name'], detections.confidence)
+                ]
+        except:
+            bounding_box_annotator = sv.BoxAnnotator()
+            label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=1)
+            rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
+            annotated_image = bounding_box_annotator.annotate(
+            scene=rgb_img, detections=detections)
+            annotated_image = label_annotator.annotate(
+            scene=annotated_image, detections=detections)
+            return annotated_image
         bounding_box_annotator = sv.BoxAnnotator()
-        label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
+        label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=1)
         rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
         annotated_image = bounding_box_annotator.annotate(
         scene=rgb_img, detections=detections)
         annotated_image = label_annotator.annotate(
+            scene=annotated_image, detections=detections, labels=labels)
+        return annotated_image
+    else:
+        model.conf = confidence
+        result = model(img, conf=confidence, classes=classes)
+        print(model.conf)
+        print(model.classes)
+        detections = sv.Detections.from_ultralytics(result[0])
+        bounding_box_annotator = sv.BoxAnnotator(thickness=1)
+        label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
+        rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
+        annotated_image = bounding_box_annotator.annotate(
+            scene=rgb_img, detections=detections)
+        
+        annotated_image = label_annotator.annotate(
             scene=annotated_image, detections=detections)
+
+        return annotated_image
+
+def infer_video_frame(img, img_file, confidence, classes, device='cpu', sahi='False', full_sahi_retrain = False, no_skip=True, split_height=320, split_width=320):
+    global previous_detections, empty_image_counter
+    if sahi:
+        if (no_skip == True):
+            def callback(image):
+                print(f'Sahi confidence:{confidence}')
+                model.conf = confidence
+                result = model(image, conf=confidence, classes=classes)[0]
+                return sv.Detections.from_ultralytics(result)
+            slicer = sv.InferenceSlicer(callback=callback, slice_wh=(split_height,split_width), iou_threshold=0.01) #if you want to detect more small objects make it high.
+            detections = slicer(image=img_file)
+            if full_sahi_retrain:
+                lol = sv.Detections.from_ultralytics(model(img_file, conf=confidence, classes=classes)[0]) #run on full image to get detections of large things
+                detections = sv.Detections.merge([detections, lol]) #merge two detections
+            detections = detections.with_nms(threshold=0.01) #the higher value, the higher chance of double detections
+            #check if no detections for long time then use a new empty(or not) detection
+            if (len(detections.xyxy) > 0) or (empty_image_counter>27):
+                previous_detections = detections
+                empty_image_counter = 0
+            if len(detections.xyxy) == 0:
+                empty_image_counter += 1
+
+        else:
+            print('\n IM USING PREVIOUS DETECTIONS\n')
+            detections = previous_detections
+            empty_image_counter += 1
+        #enable confidence mark
+        try:
+            labels = [
+                    f"{class_name} {confidence:.2f}"
+                    for class_name, confidence
+                    in zip(detections['class_name'], detections.confidence)
+                ]
+        except:
+            bounding_box_annotator = sv.BoxAnnotator()
+            label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=1)
+            rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
+            annotated_image = bounding_box_annotator.annotate(
+            scene=rgb_img, detections=detections)
+            annotated_image = label_annotator.annotate(
+            scene=annotated_image, detections=detections)
+            return annotated_image
+        bounding_box_annotator = sv.BoxAnnotator()
+        label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=1)
+        rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
+        annotated_image = bounding_box_annotator.annotate(
+        scene=rgb_img, detections=detections)
+        annotated_image = label_annotator.annotate(
+            scene=annotated_image, detections=detections, labels=labels)
         return annotated_image
     else:
         model.conf = confidence
@@ -128,7 +240,7 @@ def infer_image(img, img_file, confidence, classes, device='cpu', sahi='False'):
         return annotated_image
 
 
-# @st.cache_resource
+@st.cache_resource
 def load_model(path, device):
     model_ = YOLO(path)
     print(device)
@@ -139,7 +251,7 @@ def load_model(path, device):
     return model_
 
 
-# @st.cache_resource
+@st.cache_resource
 def download_model(url):
     model_file = wget.download(url, out="models")
     return model_file
@@ -165,7 +277,7 @@ def get_user_model():
 
 def main():
     # global variables
-    global model, cfg_model_path
+    global model, cfg_model_path, split_height, split_width
 
     st.title("Object Recognition Dashboard")
 
@@ -186,9 +298,18 @@ def main():
     if not os.path.isfile(cfg_model_path):
         st.warning("Model file not available!!!, please added to the model folder.", icon="⚠️")
     else:
+        full_sahi=False
         sahi_option = st.sidebar.checkbox('Use Sahi')
+        if sahi_option:
+            st.sidebar.write('Retrain on whole image in the end? (Better for detection of large objects, but slower)')
+            full_sahi = st.sidebar.checkbox('Enable predict on full image')
+            col1, col2 = st.columns(2)
+            with col1:
+                split_height = st.number_input('Set image split height', value=320)
+            with col2:
+                split_width = st.number_input('Set image split width:', value=320)
         device_option = st.sidebar.radio("Select Device", ['cpu', 'cuda'], disabled=False, index=0)
-
+        
         # load model
         model = load_model(cfg_model_path, device_option)
         classes = [list(model.names.values()).index(name) for name in list(model.names.values())]
@@ -214,9 +335,16 @@ def main():
         data_src = st.sidebar.radio("Select input source: ", ['Sample data', 'Upload your own data'])
 
         if input_option == 'image':
-            image_input(data_src, confidence, classes, device_option, sahi=sahi_option)
+            image_input(data_src, confidence, classes, device_option,
+                         sahi=sahi_option, full_sahi_retrain=full_sahi,
+                         split_height=split_height,
+                         split_width=split_width)
         else:
-            video_input(data_src, confidence, classes, device_option, sahi=sahi_option)
+            skip_image = st.number_input('How many images to skip:', value=0)
+            video_input(data_src, confidence, classes, device_option,
+                         sahi=sahi_option, full_sahi_retrain=full_sahi,
+                         skip_image=skip_image, split_height=split_height,
+                         split_width=split_width)
 
 
 if __name__ == "__main__":
