@@ -54,12 +54,9 @@ Sometimes Numpy crashes because of the incompatibilities with OpenCV library. To
 pip install -U opencv-python
 ```
 
-### To do (not working at the moment):
-- Supports:
-  - Custom Classes
-  - Changing Confidence
-  - Changing input/frame size for videos
-  - Batch processing
+### To do:
+- Smoothing the bounding boxes
+- Enhance Sahi predictions + added more custom settings
 
 ## References
 - https://discuss.streamlit.io/t/deploy-yolov5-object-detection-on-streamlit/27675
