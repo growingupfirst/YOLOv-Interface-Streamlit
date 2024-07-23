@@ -40,6 +40,36 @@ def image_input(data_src, confidence, classes, device='cpu', sahi=False, full_sa
             img = infer_image(img_file, ready_img, confidence, classes, device, sahi, full_sahi_retrain=full_sahi_retrain)
             st.image(img, caption="Model prediction")
 
+def batched_video_input(data_src, confidence, classes, device='cpu', sahi=False, full_sahi_retrain=False, skip_image=0, split_height=320, split_width=320): 
+    output = st.empty()
+    vid_file = None
+    if data_src == 'Sample data':
+        vid_file = "data/sample_videos/sample.mp4"
+    else:
+        vid_bytes = st.sidebar.file_uploader("Upload a video", type=['mp4', 'mpv', 'avi'])
+        if vid_bytes:
+            vid_file = "data/uploaded_data/upload." + vid_bytes.name.split('.')[-1]
+            with open(vid_file, 'wb') as out:
+                out.write(vid_bytes.read())
+
+    if vid_file:
+        cap = cv2.VideoCapture(vid_file)
+        batch_size = 4
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frames.append(frame)
+
+            if len(frames) == batch_size:
+                output_imgs = infer_batch_frame(frames, frames, confidence, classes)
+                for output_img in output_imgs:
+                    output.image(output_img)
+                frames = []
+
+            
 
 def video_input(data_src, confidence, classes, device='cpu', sahi=False, full_sahi_retrain=False, skip_image=0, split_height=320, split_width=320):
     vid_file = None
@@ -214,6 +244,7 @@ def infer_video_frame(img, img_file, confidence, classes, device='cpu', sahi='Fa
             annotated_image = label_annotator.annotate(
             scene=annotated_image, detections=detections)
             return annotated_image
+
         bounding_box_annotator = sv.BoxAnnotator()
         label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=1)
         rgb_img = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
@@ -238,6 +269,38 @@ def infer_video_frame(img, img_file, confidence, classes, device='cpu', sahi='Fa
             scene=annotated_image, detections=detections)
 
         return annotated_image
+
+def infer_batch_frame(imgs, img_files, confidence, classes, sahi='False', full_sahi_retrain = False, detect_large=False, split_height=320, split_width=320):
+        if sahi:
+            def callback(images):
+                print(f'Sahi confidence:{confidence}')
+                model.conf = confidence
+                result = model(images, conf=confidence, classes=classes)[0]
+                return sv.Detections.from_ultralytics(result)
+            slicer = sv.InferenceSlicer(callback=callback, slice_wh=(split_height,split_width), iou_threshold=0.01) #if you want to detect more small objects make it high.
+            detections = slicer(image=imgs)
+            # if full_sahi_retrain:
+            #     lol = sv.Detections.from_ultralytics(model(img_file, conf=confidence, classes=classes)[0]) #run on full image to get detections of large things
+            #     detections = sv.Detections.merge([detections, lol]) #merge two detections
+            # detections = detections.with_nms(threshold=0.01) #the higher value, the higher chance of double detections
+        else:        
+            annotated_images = []
+            model.conf = confidence
+            results = model(imgs, conf=confidence, classes=classes)
+
+        for i, result in enumerate(results):
+            rgb_img = cv2.cvtColor(img_files[i], cv2.COLOR_BGR2RGB)
+            detections = sv.Detections.from_ultralytics(results[i])
+            bounding_box_annotator = sv.BoxAnnotator(thickness=1)
+            label_annotator = sv.LabelAnnotator(text_scale=1, border_radius=10, text_thickness=4)
+            annotated_image = bounding_box_annotator.annotate(
+                scene=rgb_img, detections=detections)
+        
+            annotated_image = label_annotator.annotate(
+                scene=annotated_image, detections=detections)
+            annotated_images.append(annotated_image)
+        return annotated_images
+
 
 
 @st.cache_resource
@@ -329,7 +392,7 @@ def main():
         st.sidebar.markdown("---")
 
         # input options
-        input_option = st.sidebar.radio("Select input type: ", ['image', 'video'])
+        input_option = st.sidebar.radio("Select input type: ", ['image', 'video', 'batched_video'])
 
         # input src option
         data_src = st.sidebar.radio("Select input source: ", ['Sample data', 'Upload your own data'])
@@ -339,12 +402,14 @@ def main():
                          sahi=sahi_option, full_sahi_retrain=full_sahi,
                          split_height=split_height,
                          split_width=split_width)
-        else:
+        elif input_option == 'video':
             skip_image = st.number_input('How many images to skip:', value=0)
             video_input(data_src, confidence, classes, device_option,
                          sahi=sahi_option, full_sahi_retrain=full_sahi,
                          skip_image=skip_image, split_height=split_height,
                          split_width=split_width)
+        elif input_option == 'batched_video':
+            batched_video_input(data_src, confidence, classes)
 
 
 if __name__ == "__main__":

@@ -13,9 +13,10 @@ It was based on [this repository](https://github.com/moaaztaha/Yolo-Interface-us
 - Supports both images and videos.
 - Supports both CPU and GPU inference.
 - Supports the **latest** YOLO models (v10 n/s/m/l/x)
-- **NEW!** Now you can manually adjust splice height and width.
-- **NEW!** When using Sahi you can adjust how many images to skip. If it's 0, then all the images will be used by the model. If it's other than 0, then the script will try save the prediction of the previous image and output the result. (**Important** It may not still work correctly)
+-  Now you can manually adjust splice height and width.
 - **NEW!** YOLOv10n added to the repo
+- **NEW!** When using Sahi you can adjust how many images to skip. If it's 0, then all the images will be used by the model. If it's other than 0, then the script will try save the prediction of the previous image and output the result. (**Important** It may not still work correctly)
+- **NEW!** Batch processing (Now it is capped at 4 but will be customisable)
 
 ## How to run
 After cloning the repo:
@@ -55,11 +56,7 @@ pip install -U opencv-python
 ```
 
 ### To do (not working at the moment):
-- Supports:
-  - Custom Classes
-  - Changing Confidence
-  - Changing input/frame size for videos
-  - Batch processing
+  - Batch Processing with SAHI
 
 ## References
 - https://discuss.streamlit.io/t/deploy-yolov5-object-detection-on-streamlit/27675
